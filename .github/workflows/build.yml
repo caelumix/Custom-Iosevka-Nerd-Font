@@ -47,11 +47,16 @@ jobs:
     outputs:
       font_name: ${{ steps.resolve.outputs.font_name }}
       iosevka_version: ${{ needs.check.outputs.iosevka_version }}
+      image: ${{ steps.resolve.outputs.image }}
     steps:
       - uses: actions/checkout@v6
 
       - id: resolve
         run: |
+          REPO="${{ github.repository }}"
+          IMG="${REGISTRY}/${REPO,,}:${{ needs.check.outputs.iosevka_version }}"
+          echo "image=${IMG}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMG}" >> "$GITHUB_ENV"
           FONT_NAME=$(grep -oP '^\[buildPlans\.\K[^]]+' private-build-plans.toml | head -1)
           echo "font_name=${FONT_NAME}" >> "$GITHUB_OUTPUT"
 
@@ -67,7 +72,7 @@ jobs:
           context: .
           push: true
           build-args: IOSEVKA_VERSION=${{ needs.check.outputs.iosevka_version }}
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.check.outputs.iosevka_version }}
+          tags: ${{ env.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -86,7 +91,7 @@ jobs:
 
       - name: Build and patch
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.check.outputs.iosevka_version }}
+          IMAGE: ${{ needs.build.outputs.image }}
           FONT_NAME: ${{ needs.build.outputs.font_name }}
           OUTPUT_DIR: ${{ github.workspace }}/_output
         run: |

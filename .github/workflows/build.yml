@@ -145,5 +145,5 @@ jobs:
             "_output/${FONT_NAME}-${VERSION}.zip" \
             -R "${{ github.repository }}" \
             --title "$TAG" \
-            --generate-release-notes \
+            --generate-notes \
             --latest

@@ -16,3 +16,4 @@ RUN curl -fsSL "https://github.com/be5invis/Iosevka/archive/v${IOSEVKA_VERSION}.
     cd /iosevka && bun install
 
 WORKDIR /iosevka
+ENTRYPOINT ["/bin/bash"]

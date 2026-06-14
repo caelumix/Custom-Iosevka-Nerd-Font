@@ -17,6 +17,13 @@ Edit [release.yml](./.github/workflows/release.yml) to change the variant.
 
 See [font-patcher](https://github.com/ryanoasis/nerd-fonts#font-patcher) for details.
 
+## Install
+
+```console
+brew tap caelumix/custom-iosevka-nerd-font
+brew install --cask font-iosevka-term-ss04-nerd-font
+```
+
 ## Credits
 
 - **Iosevka** — be5invis (Belleve)

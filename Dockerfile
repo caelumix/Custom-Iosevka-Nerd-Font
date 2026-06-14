@@ -3,7 +3,7 @@ ARG IOSEVKA_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -yqq && \
-    apt-get install --no-install-recommends -yqq curl unzip fontforge ttfautohint && \
+    apt-get install --no-install-recommends -yqq ca-certificates curl unzip fontforge ttfautohint && \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL -o /tmp/patcher.zip \

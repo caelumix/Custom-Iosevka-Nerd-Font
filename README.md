@@ -2,27 +2,25 @@
 
 Pre-patched [Iosevka](https://github.com/be5invis/Iosevka) with
 [Nerd Font](https://github.com/ryanoasis/nerd-fonts) glyphs,
-automatically built and released weekly.
-
-## Variants
-
-Currently ships `IosevkaTermSS04`.
-Edit [release.yml](./.github/workflows/release.yml) to change the variant.
-
-## Patching flags
-
-```console
---careful --makegroups 2 -s -q -c -l
-```
-
-See [font-patcher](https://github.com/ryanoasis/nerd-fonts#font-patcher) for details.
+built from source when upstream releases.
 
 ## Install
 
+### Homebrew
+
 ```console
-brew tap caelumix/custom-iosevka-nerd-font
-brew install --cask font-iosevka-term-ss04-nerd-font
+brew tap caelumix/tap
+brew trust caelumix/tap/font-iosevka-custom-nerd-font
+brew install --cask font-iosevka-custom-nerd-font
 ```
+
+### Manual
+
+Download from [Releases](https://github.com/caelumix/Custom-Iosevka-Nerd-Font/releases).
+
+## Build plan
+
+See [private-build-plans.toml](./private-build-plans.toml).
 
 ## Credits
 
@@ -31,5 +29,4 @@ brew install --cask font-iosevka-term-ss04-nerd-font
 
 ## License
 
-This project distributes patched font files only.
 The fonts and embedded glyphs remain under their original [SIL OFL 1.1](./LICENSE) license.

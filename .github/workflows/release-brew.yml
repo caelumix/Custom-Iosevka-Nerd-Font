@@ -13,13 +13,20 @@ on:
 jobs:
   update-cask:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Resolve version
+      - uses: actions/checkout@v6
+        with:
+          repository: caelumix/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Resolve metadata
         run: |
+          FONT_NAME=$(grep -oP '^\[buildPlans\.\K[^]]+' private-build-plans.toml | head -1)
+          FAMILY=$(grep -oP '^\s*family\s*=\s*"\K[^"]+' private-build-plans.toml)
+
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.version }}" ]; then
@@ -29,24 +36,31 @@ jobs:
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r .tag_name)
           fi
+
+          VERSION="${TAG#v}"
+
+          echo "FONT_NAME=${FONT_NAME}" >> "$GITHUB_ENV"
+          echo "FAMILY=${FAMILY}" >> "$GITHUB_ENV"
           echo "TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "IOSEVKA_VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
 
       - name: Generate cask
         run: |
           curl -fsSL -o font.zip \
-            "https://github.com/${{ github.repository }}/releases/download/${TAG}/IosevkaTermSS04-nerd-font-${IOSEVKA_VERSION}.zip"
+            "https://github.com/${{ github.repository }}/releases/download/${TAG}/${FONT_NAME}-${VERSION}.zip"
           SHA256=$(sha256sum font.zip | cut -d' ' -f1)
           unzip -o font.zip -d fonts
 
-          mkdir -p Casks
-          cat > "Casks/font-iosevka-term-ss04-nerd-font.rb" << RUBY
-          cask "font-iosevka-term-ss04-nerd-font" do
-            version "${IOSEVKA_VERSION}"
+          CASK_NAME="font-$(echo "${FONT_NAME}" | sed -E 's/([A-Z])/-\L\1/g' | sed 's/^-//' | sed 's/_/-/g')-nerd-font"
+
+          mkdir -p tap/Casks
+          cat > "tap/Casks/${CASK_NAME}.rb" << RUBY
+          cask "${CASK_NAME}" do
+            version "${VERSION}"
             sha256 "${SHA256}"
 
-            url "https://github.com/${{ github.repository }}/releases/download/v#{version}/IosevkaTermSS04-nerd-font-#{version}.zip"
-            name "Iosevka Term SS04 Nerd Font"
+            url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${FONT_NAME}-#{version}.zip"
+            name "${FAMILY} Nerd Font"
             homepage "https://github.com/${{ github.repository }}"
 
           $(find fonts -name '*.ttf' -printf '  font "%f"\n' | sort)
@@ -56,8 +70,9 @@ jobs:
 
       - name: Commit cask
         run: |
+          cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/
+          git add .
           git diff --cached --quiet || git commit -m "chore: update cask to ${TAG}"
           git push

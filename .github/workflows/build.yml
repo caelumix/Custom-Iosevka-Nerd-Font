@@ -1,0 +1,144 @@
+name: Build
+
+on:
+  schedule:
+    - cron: '0 9 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      iosevka_tag: ${{ steps.check.outputs.iosevka_tag }}
+      iosevka_version: ${{ steps.check.outputs.iosevka_version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: check
+        run: |
+          IOSEVKA_TAG=$(curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/be5invis/Iosevka/releases/latest | jq -r .tag_name)
+          IOSEVKA_VERSION="${IOSEVKA_TAG#v}"
+          echo "iosevka_tag=${IOSEVKA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "iosevka_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
+
+          if curl -fsSL -o /dev/null \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${IOSEVKA_TAG}"; then
+            echo "${IOSEVKA_TAG} already released, skipping"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      font_name: ${{ steps.resolve.outputs.font_name }}
+      iosevka_version: ${{ needs.check.outputs.iosevka_version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: resolve
+        run: |
+          FONT_NAME=$(grep -oP '^\[buildPlans\.\K[^]]+' private-build-plans.toml | head -1)
+          echo "font_name=${FONT_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: IOSEVKA_VERSION=${{ needs.check.outputs.iosevka_version }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.check.outputs.iosevka_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  patch:
+    needs: [check, build]
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and patch
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}:${{ needs.check.outputs.iosevka_version }}
+          FONT_NAME: ${{ needs.build.outputs.font_name }}
+          OUTPUT_DIR: ${{ github.workspace }}/_output
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          docker run --rm \
+            -v "$(pwd)/private-build-plans.toml":/iosevka/private-build-plans.toml:ro \
+            -v "$OUTPUT_DIR":/output \
+            "$IMAGE" -c "
+              bun run build -- ttf::${FONT_NAME} && \
+              mkdir -p /output && \
+              find dist/${FONT_NAME}/TTF -name '*.ttf' | while read -r f; do
+                echo \"Patching \$f\"
+                fontforge -script /font-patcher/font-patcher \"\$f\" --careful --makegroups 2 -s -q -c -l -out /output
+              done
+            "
+
+      - name: Zip
+        env:
+          FONT_NAME: ${{ needs.build.outputs.font_name }}
+          VERSION: ${{ needs.check.outputs.iosevka_version }}
+          OUTPUT_DIR: ${{ github.workspace }}/_output
+        run: |
+          cd "$OUTPUT_DIR"
+          zip -r "${FONT_NAME}-${VERSION}.zip" *.ttf
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: font
+          path: _output/${{ needs.build.outputs.font_name }}-${{ needs.check.outputs.iosevka_version }}.zip
+
+  release:
+    needs: [check, build, patch]
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: font
+          path: _output
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check.outputs.iosevka_tag }}
+          FONT_NAME: ${{ needs.build.outputs.font_name }}
+          VERSION: ${{ needs.check.outputs.iosevka_version }}
+        run: |
+          gh release create "$TAG" \
+            "_output/${FONT_NAME}-${VERSION}.zip" \
+            -R "${{ github.repository }}" \
+            --title "$TAG" \
+            --generate-release-notes \
+            --latest

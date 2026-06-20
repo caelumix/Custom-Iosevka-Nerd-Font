@@ -24,6 +24,7 @@ jobs:
       should_build: ${{ steps.check.outputs.should_build }}
       iosevka_tag: ${{ steps.check.outputs.iosevka_tag }}
       iosevka_version: ${{ steps.check.outputs.iosevka_version }}
+      iosevka_base_version: ${{ steps.check.outputs.iosevka_base_version }}
     steps:
       - uses: actions/checkout@v6
 
@@ -42,11 +43,13 @@ jobs:
             SUFFIX=$((LAST_SUFFIX + 1))
             FULL_VERSION="${IOSEVKA_VERSION}-${SUFFIX}"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "iosevka_base_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
             echo "iosevka_version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
             echo "iosevka_tag=v${FULL_VERSION}" >> "$GITHUB_OUTPUT"
           else
             echo "iosevka_tag=${IOSEVKA_TAG}" >> "$GITHUB_OUTPUT"
             echo "iosevka_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "iosevka_base_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
             if curl -fsSL -o /dev/null \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
               "https://api.github.com/repos/${{ github.repository }}/releases/tags/${IOSEVKA_TAG}"; then
@@ -88,7 +91,7 @@ jobs:
         with:
           context: .
           push: true
-          build-args: IOSEVKA_VERSION=${{ needs.check.outputs.iosevka_version }}
+          build-args: IOSEVKA_VERSION=${{ needs.check.outputs.iosevka_base_version }}
           tags: ${{ env.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

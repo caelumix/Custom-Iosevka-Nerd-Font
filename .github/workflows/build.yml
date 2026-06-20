@@ -156,7 +156,7 @@ jobs:
 
       - name: Create release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TRIGGER_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check.outputs.iosevka_tag }}
           FONT_NAME: ${{ needs.build.outputs.font_name }}
           VERSION: ${{ needs.check.outputs.iosevka_version }}

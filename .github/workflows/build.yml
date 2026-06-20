@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 9 * * 0'
   workflow_dispatch:
+    inputs:
+      changelog:
+        description: 'Changelog'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -28,16 +33,28 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             https://api.github.com/repos/be5invis/Iosevka/releases/latest | jq -r .tag_name)
           IOSEVKA_VERSION="${IOSEVKA_TAG#v}"
-          echo "iosevka_tag=${IOSEVKA_TAG}" >> "$GITHUB_OUTPUT"
-          echo "iosevka_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
 
-          if curl -fsSL -o /dev/null \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${IOSEVKA_TAG}"; then
-            echo "${IOSEVKA_TAG} already released, skipping"
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-          else
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            LAST_SUFFIX=$(curl -fsSL \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases" | \
+              jq -r "[.[].tag_name | select(startswith(\"v${IOSEVKA_VERSION}-\")) | ltrimstr(\"v${IOSEVKA_VERSION}-\") | tonumber] | max // 0")
+            SUFFIX=$((LAST_SUFFIX + 1))
+            FULL_VERSION="${IOSEVKA_VERSION}-${SUFFIX}"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "iosevka_version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "iosevka_tag=v${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "iosevka_tag=${IOSEVKA_TAG}" >> "$GITHUB_OUTPUT"
+            echo "iosevka_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
+            if curl -fsSL -o /dev/null \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/${IOSEVKA_TAG}"; then
+              echo "${IOSEVKA_TAG} already released, skipping"
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_build=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
   build:
@@ -140,10 +157,20 @@ jobs:
           TAG: ${{ needs.check.outputs.iosevka_tag }}
           FONT_NAME: ${{ needs.build.outputs.font_name }}
           VERSION: ${{ needs.check.outputs.iosevka_version }}
+          CHANGELOG: ${{ inputs.changelog }}
         run: |
-          gh release create "$TAG" \
-            "_output/${FONT_NAME}-${VERSION}.zip" \
-            -R "${{ github.repository }}" \
-            --title "$TAG" \
-            --generate-notes \
-            --latest
+          if [ -n "$CHANGELOG" ]; then
+            gh release create "$TAG" \
+              "_output/${FONT_NAME}-${VERSION}.zip" \
+              -R "${{ github.repository }}" \
+              --title "$TAG" \
+              --notes "$CHANGELOG" \
+              --latest
+          else
+            gh release create "$TAG" \
+              "_output/${FONT_NAME}-${VERSION}.zip" \
+              -R "${{ github.repository }}" \
+              --title "$TAG" \
+              --generate-notes \
+              --latest
+          fi

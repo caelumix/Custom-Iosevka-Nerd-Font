@@ -10,8 +10,11 @@ noLigation = true
   inherits = "ss07"
 
     [buildPlans.IosevkaCustom.variants.design]
-    capital-z = "straight-serifless-with-horizontal-crossbar"
-    z = "straight-serifless-with-horizontal-crossbar"
+    a = "double-storey-serifless"
+    cyrl-capital-ze = "unilateral-inward-serifed"
+    cyrl-capital-ka = "symmetric-touching-top-left-serifed"
+    cyrl-capital-en = "top-left-serifed"
+    cyrl-capital-er = "closed-motion-serifed"
     ampersand = "upper-open"
     at = "threefold"
 

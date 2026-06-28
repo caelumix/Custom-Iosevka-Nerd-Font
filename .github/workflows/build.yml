@@ -160,20 +160,31 @@ jobs:
           TAG: ${{ needs.check.outputs.iosevka_tag }}
           FONT_NAME: ${{ needs.build.outputs.font_name }}
           VERSION: ${{ needs.check.outputs.iosevka_version }}
+          IOSEVKA_BASE_VERSION: ${{ needs.check.outputs.iosevka_base_version }}
           CHANGELOG: ${{ inputs.changelog }}
         run: |
+          NOTES_FILE="$(mktemp)"
+
           if [ -n "$CHANGELOG" ]; then
-            gh release create "$TAG" \
-              "_output/${FONT_NAME}-${VERSION}.zip" \
-              -R "${{ github.repository }}" \
-              --title "$TAG" \
-              --notes "$CHANGELOG" \
-              --latest
+            printf '%s\n' "$CHANGELOG" > "$NOTES_FILE"
           else
-            gh release create "$TAG" \
-              "_output/${FONT_NAME}-${VERSION}.zip" \
-              -R "${{ github.repository }}" \
-              --title "$TAG" \
-              --generate-notes \
-              --latest
+            IOSEVKA_REL="https://github.com/be5invis/Iosevka/releases/tag/v${IOSEVKA_BASE_VERSION}"
+
+            NF_TAG=$(curl -fsSL \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | jq -r .tag_name)
+            NF_REL="https://github.com/ryanoasis/nerd-fonts/releases/tag/${NF_TAG}"
+
+            {
+              printf '[Iosevka v%s](%s)\n\n' "$IOSEVKA_BASE_VERSION" "$IOSEVKA_REL"
+              printf '---\n\n'
+              printf 'Patched with [Nerd Fonts %s](%s)\n' "$NF_TAG" "$NF_REL"
+            } > "$NOTES_FILE"
           fi
+
+          gh release create "$TAG" \
+            "_output/${FONT_NAME}-${VERSION}.zip" \
+            -R "${{ github.repository }}" \
+            --title "$TAG" \
+            --notes-file "$NOTES_FILE" \
+            --latest

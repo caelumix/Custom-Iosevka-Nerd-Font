@@ -177,7 +177,7 @@ jobs:
 
             {
               printf '[Iosevka v%s](%s)\n\n' "$IOSEVKA_BASE_VERSION" "$IOSEVKA_REL"
-              printf '---\n\n'
+              printf '%s\n\n' '---'
               printf 'Patched with [Nerd Fonts %s](%s)\n' "$NF_TAG" "$NF_REL"
             } > "$NOTES_FILE"
           fi

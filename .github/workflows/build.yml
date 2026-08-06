@@ -134,8 +134,9 @@ jobs:
           VERSION: ${{ needs.check.outputs.iosevka_version }}
           OUTPUT_DIR: ${{ github.workspace }}/_output
         run: |
+          cp "${{ github.workspace }}/LICENSE" "$OUTPUT_DIR/LICENSE"
           cd "$OUTPUT_DIR"
-          zip -r "${FONT_NAME}-${VERSION}.zip" *.ttf
+          zip -r "${FONT_NAME}-${VERSION}.zip" *.ttf LICENSE
 
       - uses: actions/upload-artifact@v7
         with:

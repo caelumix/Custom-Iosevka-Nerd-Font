@@ -35,30 +35,47 @@ jobs:
             https://api.github.com/repos/be5invis/Iosevka/releases/latest | jq -r .tag_name)
           IOSEVKA_VERSION="${IOSEVKA_TAG#v}"
 
+          RELEASES=$(curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100")
+          MATCHING_TAGS=$(jq -c --arg base "$IOSEVKA_TAG" '
+            [.[].tag_name | select(
+              . == $base or
+              (startswith($base + "-") and
+                (ltrimstr($base + "-") | test("^[1-9][0-9]*$")))
+            )]
+          ' <<< "$RELEASES")
+          RELEASE_COUNT=$(jq 'length' <<< "$MATCHING_TAGS")
+
+          FULL_VERSION="$IOSEVKA_VERSION"
+          SHOULD_BUILD=true
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            LAST_SUFFIX=$(curl -fsSL \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases" | \
-              jq -r "[.[].tag_name | select(startswith(\"v${IOSEVKA_VERSION}-\")) | ltrimstr(\"v${IOSEVKA_VERSION}-\") | tonumber] | max // 0")
-            SUFFIX=$((LAST_SUFFIX + 1))
-            FULL_VERSION="${IOSEVKA_VERSION}-${SUFFIX}"
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "iosevka_base_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
-            echo "iosevka_version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
-            echo "iosevka_tag=v${FULL_VERSION}" >> "$GITHUB_OUTPUT"
-          else
-            echo "iosevka_tag=${IOSEVKA_TAG}" >> "$GITHUB_OUTPUT"
-            echo "iosevka_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
-            echo "iosevka_base_version=${IOSEVKA_VERSION}" >> "$GITHUB_OUTPUT"
-            if curl -fsSL -o /dev/null \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/tags/${IOSEVKA_TAG}"; then
-              echo "${IOSEVKA_TAG} already released, skipping"
-              echo "should_build=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "should_build=true" >> "$GITHUB_OUTPUT"
+            # A manual retry after a failed first release keeps the base version.
+            # Only an actual rebuild of an existing version receives a suffix.
+            if [ "$RELEASE_COUNT" -gt 0 ]; then
+              LAST_SUFFIX=$(jq -r --arg prefix "${IOSEVKA_TAG}-" '
+                [.[]
+                  | select(startswith($prefix))
+                  | ltrimstr($prefix)
+                  | select(test("^[1-9][0-9]*$"))
+                  | tonumber
+                ] | max // 0
+              ' <<< "$MATCHING_TAGS")
+              FULL_VERSION="${IOSEVKA_VERSION}-$((LAST_SUFFIX + 1))"
             fi
+          elif [ "$RELEASE_COUNT" -gt 0 ]; then
+            # A suffixed manual release also means this upstream version was built.
+            echo "${IOSEVKA_TAG} already released as $(jq -r 'join(", ")' <<< "$MATCHING_TAGS"), skipping"
+            SHOULD_BUILD=false
           fi
+
+          {
+            echo "should_build=${SHOULD_BUILD}"
+            echo "iosevka_base_version=${IOSEVKA_VERSION}"
+            echo "iosevka_version=${FULL_VERSION}"
+            echo "iosevka_tag=v${FULL_VERSION}"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: check

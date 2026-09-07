@@ -29,4 +29,8 @@ See [private-build-plans.toml](./private-build-plans.toml).
 
 ## License
 
-The fonts and embedded glyphs remain under their original [SIL OFL 1.1](./LICENSE) license.
+The fonts are distributed under the [SIL OFL 1.1](./LICENSE).
+
+Nerd Fonts glyphs originate from multiple upstream projects under various licenses.
+See the [Nerd Fonts glyph sources](https://github.com/ryanoasis/nerd-fonts/tree/master/src/glyphs)
+for their respective copyright and licensing information.

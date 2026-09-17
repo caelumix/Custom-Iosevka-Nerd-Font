@@ -64,7 +64,6 @@ jobs:
             homepage "https://github.com/${{ github.repository }}"
 
           $(find fonts -name '*.ttf' -printf '  font "%f"\n' | sort)
-
           end
           RUBY
 

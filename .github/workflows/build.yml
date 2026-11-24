@@ -10,80 +10,83 @@ on:
         required: false
         type: string
 
-permissions:
-  contents: write
-  packages: write
-
 env:
   REGISTRY: ghcr.io
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
-      iosevka_tag: ${{ steps.check.outputs.iosevka_tag }}
-      iosevka_version: ${{ steps.check.outputs.iosevka_version }}
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
       iosevka_base_version: ${{ steps.check.outputs.iosevka_base_version }}
+      nf_version: ${{ steps.check.outputs.nf_version }}
     steps:
       - uses: actions/checkout@v6
 
       - id: check
+        env:
+          API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          IOSEVKA_TAG=$(curl -fsSL \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/be5invis/Iosevka/releases/latest | jq -r .tag_name)
-          IOSEVKA_VERSION="${IOSEVKA_TAG#v}"
+          IOSEVKA_TAG=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" \
+            "https://api.github.com/repos/be5invis/Iosevka/releases/latest" | jq -r .tag_name)
+          NF_TAG=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" \
+            "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | jq -r .tag_name)
 
-          RELEASES=$(curl -fsSL \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100")
-          MATCHING_TAGS=$(jq -c --arg base "$IOSEVKA_TAG" '
-            [.[].tag_name | select(
-              . == $base or
-              (startswith($base + "-") and
-                (ltrimstr($base + "-") | test("^[1-9][0-9]*$")))
-            )]
-          ' <<< "$RELEASES")
-          RELEASE_COUNT=$(jq 'length' <<< "$MATCHING_TAGS")
+          case "$IOSEVKA_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::unexpected Iosevka tag: '${IOSEVKA_TAG}'"; exit 1 ;;
+          esac
+          case "$NF_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::unexpected Nerd Fonts tag: '${NF_TAG}'"; exit 1 ;;
+          esac
+
+          IOSEVKA_VERSION="${IOSEVKA_TAG#v}"
+          NF_VERSION="${NF_TAG#v}"
+
+          TAGS=$(git ls-remote --tags --refs origin 'refs/tags/v*' | awk -F/ '{print $NF}')
+          LATEST=$(printf '%s\n' "$TAGS" | sed -E 's/^v//; s/-[0-9]+$//' | sort -V | tail -1)
+          LATEST="${LATEST:-0}"
+          SUFFIX=$(printf '%s\n' "$TAGS" | sed -n "s/^v${IOSEVKA_VERSION//./\\.}-\\([1-9][0-9]*\\)$/\1/p" | sort -n | tail -1)
 
           FULL_VERSION="$IOSEVKA_VERSION"
-          SHOULD_BUILD=true
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_BUILD=true
             # A manual retry after a failed first release keeps the base version.
             # Only an actual rebuild of an existing version receives a suffix.
-            if [ "$RELEASE_COUNT" -gt 0 ]; then
-              LAST_SUFFIX=$(jq -r --arg prefix "${IOSEVKA_TAG}-" '
-                [.[]
-                  | select(startswith($prefix))
-                  | ltrimstr($prefix)
-                  | select(test("^[1-9][0-9]*$"))
-                  | tonumber
-                ] | max // 0
-              ' <<< "$MATCHING_TAGS")
-              FULL_VERSION="${IOSEVKA_VERSION}-$((LAST_SUFFIX + 1))"
+            if printf '%s\n' "$TAGS" | grep -qxF "v${IOSEVKA_VERSION}" || [ -n "$SUFFIX" ]; then
+              FULL_VERSION="${IOSEVKA_VERSION}-$(( ${SUFFIX:-0} + 1 ))"
             fi
-          elif [ "$RELEASE_COUNT" -gt 0 ]; then
-            # A suffixed manual release also means this upstream version was built.
-            echo "${IOSEVKA_TAG} already released as $(jq -r 'join(", ")' <<< "$MATCHING_TAGS"), skipping"
+          elif [ "$IOSEVKA_VERSION" != "$LATEST" ] && \
+            [ "$(printf '%s\n%s\n' "$LATEST" "$IOSEVKA_VERSION" | sort -V | tail -1)" = "$IOSEVKA_VERSION" ]; then
+            SHOULD_BUILD=true
+          else
             SHOULD_BUILD=false
           fi
 
           {
             echo "should_build=${SHOULD_BUILD}"
+            echo "tag=v${FULL_VERSION}"
+            echo "version=${FULL_VERSION}"
             echo "iosevka_base_version=${IOSEVKA_VERSION}"
-            echo "iosevka_version=${FULL_VERSION}"
-            echo "iosevka_tag=v${FULL_VERSION}"
+            echo "nf_version=${NF_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
       font_name: ${{ steps.resolve.outputs.font_name }}
-      iosevka_version: ${{ needs.check.outputs.iosevka_version }}
+      version: ${{ needs.check.outputs.version }}
       image: ${{ steps.resolve.outputs.image }}
     steps:
       - uses: actions/checkout@v6
@@ -91,9 +94,8 @@ jobs:
       - id: resolve
         run: |
           REPO="${{ github.repository }}"
-          IMG="${REGISTRY}/${REPO,,}:${{ needs.check.outputs.iosevka_version }}"
+          IMG="${REGISTRY}/${REPO,,}:${{ needs.check.outputs.version }}"
           echo "image=${IMG}" >> "$GITHUB_OUTPUT"
-          echo "image=${IMG}" >> "$GITHUB_ENV"
           FONT_NAME=$(grep -oP '^\[buildPlans\.\K[^]]+' private-build-plans.toml | head -1)
           echo "font_name=${FONT_NAME}" >> "$GITHUB_OUTPUT"
 
@@ -108,8 +110,10 @@ jobs:
         with:
           context: .
           push: true
-          build-args: IOSEVKA_VERSION=${{ needs.check.outputs.iosevka_base_version }}
-          tags: ${{ env.image }}
+          build-args: |
+            IOSEVKA_VERSION=${{ needs.check.outputs.iosevka_base_version }}
+            NF_VERSION=${{ needs.check.outputs.nf_version }}
+          tags: ${{ steps.resolve.outputs.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -117,6 +121,9 @@ jobs:
     needs: [check, build]
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v6
 
@@ -133,32 +140,39 @@ jobs:
           OUTPUT_DIR: ${{ github.workspace }}/_output
         run: |
           mkdir -p "$OUTPUT_DIR"
-          docker run --rm \
+          docker run --rm -i -e FONT_NAME \
             -v "$(pwd)/private-build-plans.toml":/iosevka/private-build-plans.toml:ro \
             -v "$OUTPUT_DIR":/output \
-            "$IMAGE" -c "
-              bun run build -- ttf::${FONT_NAME} && \
-              mkdir -p /output && \
-              find dist/${FONT_NAME}/TTF -name '*.ttf' | while read -r f; do
-                echo \"Patching \$f\"
-                fontforge -script /font-patcher/font-patcher \"\$f\" --careful --makegroups 2 -s -q -c -l -out /output
-              done
-            "
+            "$IMAGE" -s <<'EOS'
+          set -e
+          bun run build -- ttf::"$FONT_NAME"
+          mkdir -p /output
+          find "dist/$FONT_NAME/TTF" -name '*.ttf' | sort | while read -r f; do
+            echo "Patching $f"
+            fontforge -script /font-patcher/font-patcher "$f" --careful --makegroups 2 -s -q -c -l -out /output
+          done
+          n=$(find "dist/$FONT_NAME/TTF" -name '*.ttf' | wc -l)
+          m=$(find /output -maxdepth 1 -name '*.ttf' | wc -l)
+          echo "patched $m/$n"
+          [ "$n" -gt 0 ]
+          [ "$n" = "$m" ]
+          [ -z "$(find /output -maxdepth 1 -name '*.ttf' -size -1000000c)" ]
+          EOS
 
       - name: Zip
         env:
           FONT_NAME: ${{ needs.build.outputs.font_name }}
-          VERSION: ${{ needs.check.outputs.iosevka_version }}
+          VERSION: ${{ needs.check.outputs.version }}
           OUTPUT_DIR: ${{ github.workspace }}/_output
         run: |
           cp "${{ github.workspace }}/LICENSE" "$OUTPUT_DIR/LICENSE"
           cd "$OUTPUT_DIR"
-          zip -r "${FONT_NAME}-${VERSION}.zip" *.ttf LICENSE
+          zip -r "${FONT_NAME}-${VERSION}.zip" ./*.ttf LICENSE
 
       - uses: actions/upload-artifact@v7
         with:
           name: font
-          path: _output/${{ needs.build.outputs.font_name }}-${{ needs.check.outputs.iosevka_version }}.zip
+          path: _output/${{ needs.build.outputs.font_name }}-${{ needs.check.outputs.version }}.zip
 
   release:
     needs: [check, build, patch]
@@ -175,34 +189,24 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TRIGGER_TOKEN || secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.check.outputs.iosevka_tag }}
+          TAG: ${{ needs.check.outputs.tag }}
           FONT_NAME: ${{ needs.build.outputs.font_name }}
-          VERSION: ${{ needs.check.outputs.iosevka_version }}
+          VERSION: ${{ needs.check.outputs.version }}
           IOSEVKA_BASE_VERSION: ${{ needs.check.outputs.iosevka_base_version }}
+          NF_VERSION: ${{ needs.check.outputs.nf_version }}
           CHANGELOG: ${{ inputs.changelog }}
         run: |
-          NOTES_FILE="$(mktemp)"
-
           if [ -n "$CHANGELOG" ]; then
-            printf '%s\n' "$CHANGELOG" > "$NOTES_FILE"
+            printf '%s\n' "$CHANGELOG"
           else
-            IOSEVKA_REL="https://github.com/be5invis/Iosevka/releases/tag/v${IOSEVKA_BASE_VERSION}"
-
-            NF_TAG=$(curl -fsSL \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest" | jq -r .tag_name)
-            NF_REL="https://github.com/ryanoasis/nerd-fonts/releases/tag/${NF_TAG}"
-
-            {
-              printf '[Iosevka v%s](%s)\n\n' "$IOSEVKA_BASE_VERSION" "$IOSEVKA_REL"
-              printf '%s\n\n' '---'
-              printf 'Patched with [Nerd Fonts %s](%s)\n' "$NF_TAG" "$NF_REL"
-            } > "$NOTES_FILE"
-          fi
-
-          gh release create "$TAG" \
+            printf '[Iosevka v%s](https://github.com/be5invis/Iosevka/releases/tag/v%s)\n\n' \
+              "$IOSEVKA_BASE_VERSION" "$IOSEVKA_BASE_VERSION"
+            printf '%s\n\n' '---'
+            printf 'Patched with [Nerd Fonts v%s](https://github.com/ryanoasis/nerd-fonts/releases/tag/v%s)\n' \
+              "$NF_VERSION" "$NF_VERSION"
+          fi | gh release create "$TAG" \
             "_output/${FONT_NAME}-${VERSION}.zip" \
             -R "${{ github.repository }}" \
             --title "$TAG" \
-            --notes-file "$NOTES_FILE" \
+            --notes-file - \
             --latest

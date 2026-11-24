@@ -1,5 +1,6 @@
 FROM oven/bun:debian
 ARG IOSEVKA_VERSION
+ARG NF_VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -yqq && \
@@ -7,7 +8,7 @@ RUN apt-get update -yqq && \
     rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL -o /tmp/patcher.zip \
-        https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FontPatcher.zip && \
+        "https://github.com/ryanoasis/nerd-fonts/releases/download/v${NF_VERSION}/FontPatcher.zip" && \
     unzip -o /tmp/patcher.zip -d /font-patcher && \
     rm /tmp/patcher.zip
 

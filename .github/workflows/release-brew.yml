@@ -10,9 +10,16 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: update-cask
+  cancel-in-progress: false
+
 jobs:
   update-cask:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
 
@@ -23,26 +30,31 @@ jobs:
           path: tap
 
       - name: Resolve metadata
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FONT_NAME=$(grep -oP '^\[buildPlans\.\K[^]]+' private-build-plans.toml | head -1)
+          FONT_NAME=$(grep -m1 -oP '^\[buildPlans\.\K[^].]+(?=\])' private-build-plans.toml)
           FAMILY=$(grep -oP '^\s*family\s*=\s*"\K[^"]+' private-build-plans.toml)
 
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG="${GITHUB_REF_NAME}"
-          elif [ -n "${{ inputs.version }}" ]; then
-            TAG="${{ inputs.version }}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            TAG="$INPUT_VERSION"
           else
             TAG=$(curl -fsSL \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Authorization: Bearer $API_TOKEN" \
               "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r .tag_name)
           fi
 
           VERSION="${TAG#v}"
 
-          echo "FONT_NAME=${FONT_NAME}" >> "$GITHUB_ENV"
-          echo "FAMILY=${FAMILY}" >> "$GITHUB_ENV"
-          echo "TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          {
+            echo "FONT_NAME=${FONT_NAME}"
+            echo "FAMILY=${FAMILY}"
+            echo "TAG=${TAG}"
+            echo "VERSION=${VERSION}"
+          } >> "$GITHUB_ENV"
 
       - name: Generate cask
         run: |
@@ -51,7 +63,7 @@ jobs:
           SHA256=$(sha256sum font.zip | cut -d' ' -f1)
           unzip -o font.zip -d fonts
 
-          CASK_NAME="font-$(echo "${FONT_NAME}" | sed -E 's/([A-Z])/-\L\1/g' | sed 's/^-//' | sed 's/_/-/g')-nerd-font"
+          CASK_NAME="font-$(echo "${FONT_NAME}" | sed -E 's/([A-Z])/-\L\1/g; s/^-//; s/_/-/g')-nerd-font"
 
           mkdir -p tap/Casks
           cat > "tap/Casks/${CASK_NAME}.rb" << RUBY
@@ -67,11 +79,13 @@ jobs:
           end
           RUBY
 
+          echo "CASK_NAME=${CASK_NAME}" >> "$GITHUB_ENV"
+
       - name: Commit cask
         run: |
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
+          git add "Casks/${CASK_NAME}.rb"
           git diff --cached --quiet || git commit -m "chore: update cask to ${TAG}"
           git push

@@ -10,12 +10,17 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
@@ -54,19 +59,19 @@ jobs:
           SUFFIX=$(printf '%s\n' "$TAGS" | sed -n "s/^v${IOSEVKA_VERSION//./\\.}-\\([1-9][0-9]*\\)$/\1/p" | sort -n | tail -1)
 
           FULL_VERSION="$IOSEVKA_VERSION"
+          SHOULD_BUILD=false
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SHOULD_BUILD=true
-            # A manual retry after a failed first release keeps the base version.
-            # Only an actual rebuild of an existing version receives a suffix.
-            if printf '%s\n' "$TAGS" | grep -qxF "v${IOSEVKA_VERSION}" || [ -n "$SUFFIX" ]; then
+          if [ "$IOSEVKA_VERSION" = "$LATEST" ]; then
+            # Upstream unchanged: only a manual rerun may rebuild, with a suffix.
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              SHOULD_BUILD=true
               FULL_VERSION="${IOSEVKA_VERSION}-$(( ${SUFFIX:-0} + 1 ))"
             fi
-          elif [ "$IOSEVKA_VERSION" != "$LATEST" ] && \
-            [ "$(printf '%s\n%s\n' "$LATEST" "$IOSEVKA_VERSION" | sort -V | tail -1)" = "$IOSEVKA_VERSION" ]; then
+          elif [ "$(printf '%s\n%s\n' "$LATEST" "$IOSEVKA_VERSION" | sort -V | tail -1)" = "$IOSEVKA_VERSION" ]; then
             SHOULD_BUILD=true
-          else
-            SHOULD_BUILD=false
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::error::upstream Iosevka v${IOSEVKA_VERSION} is older than the latest release (${LATEST})"
+            exit 1
           fi
 
           {
@@ -81,12 +86,12 @@ jobs:
     needs: check
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write
     outputs:
       font_name: ${{ steps.resolve.outputs.font_name }}
-      version: ${{ needs.check.outputs.version }}
       image: ${{ steps.resolve.outputs.image }}
     steps:
       - uses: actions/checkout@v6
@@ -96,7 +101,7 @@ jobs:
           REPO="${{ github.repository }}"
           IMG="${REGISTRY}/${REPO,,}:${{ needs.check.outputs.version }}"
           echo "image=${IMG}" >> "$GITHUB_OUTPUT"
-          FONT_NAME=$(grep -oP '^\[buildPlans\.\K[^]]+' private-build-plans.toml | head -1)
+          FONT_NAME=$(grep -m1 -oP '^\[buildPlans\.\K[^].]+(?=\])' private-build-plans.toml)
           echo "font_name=${FONT_NAME}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
@@ -121,6 +126,7 @@ jobs:
     needs: [check, build]
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: read
@@ -178,6 +184,7 @@ jobs:
     needs: [check, build, patch]
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

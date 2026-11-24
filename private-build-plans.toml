@@ -1,20 +1,13 @@
 [buildPlans.IosevkaCustom]
 family = "Iosevka Custom"
-spacing = "fontconfig-mono"
-serifs = "sans"
+spacing = "fixed"
 noCvSs = true
-exportGlyphNames = false
-noLigation = true
 
   [buildPlans.IosevkaCustom.variants]
   inherits = "ss07"
 
     [buildPlans.IosevkaCustom.variants.design]
     a = "double-storey-serifless"
-    cyrl-capital-ze = "unilateral-inward-serifed"
-    cyrl-capital-ka = "symmetric-touching-top-left-serifed"
-    cyrl-capital-en = "top-left-serifed"
-    cyrl-capital-er = "closed-motion-serifed"
     ampersand = "upper-open"
     at = "threefold"
 
@@ -27,6 +20,11 @@ css = 400
 shape = 700
 menu = 700
 css = 700
+
+[buildPlans.IosevkaCustom.widths.Normal]
+shape = 500
+menu = 5
+css = "normal"
 
 [buildPlans.IosevkaCustom.slopes.Upright]
 angle = 0
